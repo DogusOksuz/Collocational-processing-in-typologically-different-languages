@@ -1,0 +1,219 @@
+---
+title: "bnc_tnc_freq_assoc"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+#packages 
+
+```{r}
+install.packages("tidyverse") #loading required packages
+install.packages("broom")
+install.packages("car")
+install.packages("lme4")
+install.packages("lmerTest")
+install.packages("emmeans")
+install.packages("patchwork")
+installed.packages("knitr")
+library(tidyverse)
+library(car)
+library(lme4)
+library(lmerTest)
+library(emmeans)
+library(patchwork)
+library(knitr)
+library(broom)
+```
+
+#Data wrangling
+
+```{r}
+corpus_data <- read.csv('collocation_corpus_data.csv')
+corpus_data <- as_tibble(corpus_data)
+corpus_data
+range(corpus_data$Relative.frequency.counts)
+corpus_data<- rename(corpus_data, relative_frequency = Relative.frequency.counts)
+filter(corpus_data, relative_frequency == 0.007 | relative_frequency == 70.890)
+corpus_data <- rename(corpus_data, lematisation_status = Lemmatisation.status)
+corpus_data <- rename(corpus_data, frequency_band = Frequency.band)
+corpus_data <- mutate(corpus_data, coll_length = str_length(Collocations)- 2)
+corpus_data <- corpus_data %>% mutate(zipf_scale_freq = log10(relative_frequency) + 3)
+range(corpus_data$zipf_scale_freq)
+filter(corpus_data, zipf_scale_freq %in% range(zipf_scale_freq)) #let's see the highest and lowest freq collocations
+corpus_data
+corpus_data<- corpus_data %>%
+  mutate_if(sapply(corpus_data, is.character), as.factor)
+corpus_data
+levels(corpus_data$lematisation_status) <- c("Inf_family", "Form")
+write.csv(corpus_data,"~/Desktop/corpus_data_freq.csv")
+
+```
+
+#Data visualisation
+
+```{r}
+histogram_basic <-ggplot(corpus_data, aes(x=zipf_scale_freq)) + 
+  geom_histogram(color="black", fill="white")
+histogram_basic
+hist_mean <- histogram_basic + geom_vline(aes(xintercept=mean(zipf_scale_freq)),
+              color="blue", linetype="dashed", size=1)       #to add a mean line 
+hist_mean
+
+density <- ggplot(corpus_data, aes(x=zipf_scale_freq)) +                  #to add a density plot 
+  geom_histogram(aes(y=..density..), colour="black", fill="white")+
+  geom_density(alpha=.2, fill="#FF6666") +
+  theme_minimal() + 
+  scale_y_continuous(name = "Zipf Scale Frequency Counts")
+
+density
+
+lang_specific_hist <-ggplot(corpus_data, aes(x=zipf_scale_freq, fill=Language, color=Language)) +
+  geom_histogram(position="identity", alpha=0.5) +
+  facet_grid(Language ~ .)
+
+lang_specific_hist + scale_x_continuous(name = "Zipf Scale Frequency Counts")
+
+```
+
+#Some descriptive stats - frequency counts in English & Turkish
+
+```{r}
+mean_zipf_scale_freq <- corpus_data %>% summarise(
+  freq_mean = mean(zipf_scale_freq),
+  freq_sd = sd(zipf_scale_freq))
+mean_zipf_scale_freq
+  
+corpus_data_lang_agg <- corpus_data %>%
+  group_by(Language) %>%
+  summarise(mean_frequency_counts = mean(zipf_scale_freq),
+            sd_frequency_counts = sd(zipf_scale_freq)) 
+corpus_data_lang_agg
+
+corpus_data_lemma_agg <- corpus_data %>%
+  group_by(lematisation_status) %>%
+  summarise(mean_frequency_counts = mean(zipf_scale_freq),
+            sd_frequency_counts = sd(zipf_scale_freq))
+corpus_data_lemma_agg            
+
+corpus_data_form <- filter(corpus_data, lematisation_status == 'form')
+corpus_data_form
+corpus_data_form_agg <- corpus_data_form  %>%
+  group_by(Language) %>%
+  summarise(mean_frequency_counts = mean(zipf_scale_freq),
+            sd_frequency_counts = sd(zipf_scale_freq))
+
+corpus_data_form_agg
+
+corpus_data_lemma <- filter(corpus_data, lematisation_status == 'Inf_family')
+
+corpus_data_lemma_agg <- corpus_data_lemma  %>%
+  group_by(Language) %>%
+  summarise(mean_frequency_counts = mean(zipf_scale_freq),
+            sd_frequency_counts = sd(zipf_scale_freq))
+corpus_data_lemma_agg
+
+box_plot <- ggplot(data = corpus_data, aes(x = Language, y = zipf_scale_freq)) +
+  geom_jitter(alpha = 0.1) +
+  geom_boxplot(alpha = 0) +
+  facet_grid(lematisation_status ~ .) +
+  theme_classic() +
+  labs(y = "Frequency")
+box_plot
+
+range(corpus_data$zipf_scale_freq)
+```
+
+#Comparing frequency counts in the two languages 
+
+```{r}
+#violin plots for frequency counts
+Figure_1 <- ggplot(corpus_data, aes(x = Language, y= zipf_scale_freq, fill = Language)) +
+  geom_violin(alpha = .4) +
+  geom_boxplot(width = .2, fatten = NULL, alpha = .6) +
+  stat_summary(fun = "mean", geom = "point") +
+  stat_summary(fun.data = "mean_se", geom = "errorbar", width = .1) +
+  facet_wrap(~factor(lematisation_status,
+                     levels = c("Inf_family", "Form"),
+                     labels = c("Inf_family frequency", 
+                                "Form frequency"))) +
+  theme_minimal() + 
+  scale_y_continuous(name = "Zipf Scale Frequency Counts")
+  scale_fill_brewer(palette = "Dark2") +
+  guides(fill = "none")
+
+Figure_1
+Figure_1 + theme(text = element_text(size = 12))                    # for text 
+Figure_1 + theme(text = element_text(size = 25))                    # for presentation - font sizes
+
+```
+
+#Data prep for modelling 
+
+```{r}
+corpus_data
+language <- as.factor(corpus_data$Language)
+language <- as_tibble(language)
+language
+lemmatisation <- as.factor(corpus_data$lematisation_status)
+lemmatisation <- as_tibble(lemmatisation)
+lemmatisation
+
+corpus_freq <- cbind(corpus_data, language)
+corpus_freq <- rename(corpus_freq, Lang = value)
+corpus_freq <- cbind(corpus_freq, lemmatisation)
+corpus_freq <- rename(corpus_freq, lemmat = value)
+
+corpus_freq <- select(corpus_freq, Collocations, coll_length, Lang, lemmat, zipf_scale_freq)
+corpus_freq <- as_tibble(corpus_freq)
+corpus_freq
+
+corpus_freq_form <- filter(corpus_freq, lemmat == 'Form')
+corpus_freq_Inf_family <- filter(corpus_freq, lemmat == 'Inf_family')
+
+```
+
+#GLM modelling
+
+```{r}
+#GLM testing lang & lemmatisation effects
+form_freq_model <- lm(zipf_scale_freq ~ Lang, data = corpus_freq_form)
+summary(form_freq_model)
+inf_freq_model <- lm(zipf_scale_freq ~ Lang, data = corpus_freq_Inf_family)
+summary(inf_freq_model)
+
+```
+
+#Log Dice 
+
+```{r}
+
+#LD_scores
+LD_agg <- corpus_association  %>%
+  group_by(Language) %>%
+  summarise(mean_LD_scores = mean(log_Dice),
+            sd_LD_scores = sd(log_Dice))
+LD_agg
+LD_lemma_status_agg <- corpus_association  %>%
+  group_by(Lemmatisation_stat) %>%
+  summarise(mean_LD_scores = mean(log_Dice),
+            sd_LD_scores = sd(log_Dice))
+LD_lemma_status_agg
+LD_form_agg_mean <- corpus_association_form  %>%
+  group_by(Language) %>%
+  summarise(mean_LD_scores = mean(log_Dice),
+            sd_LD_scores = sd(log_Dice))
+LD_form_agg_mean
+LD_lemma_agg_mean <- corpus_association_lemma  %>%
+  group_by(Language) %>%
+  summarise(mean_LD_scores = mean(log_Dice),
+            sd_LD_scores = sd(log_Dice))
+LD_lemma_agg_mean
+LD_lemma_agg_range <- corpus_association_lemma  %>%
+  group_by(Language) %>%
+  summarise(range(log_Dice))
+LD_lemma_agg_range
+
+corpus_freq_form 
+```
+
