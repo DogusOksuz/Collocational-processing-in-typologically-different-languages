@@ -1,5 +1,6 @@
 
 #Study 1 Corpus Study
+
 mean_zipf_scale_freq <- corpus_data %>% summarise(
   freq_mean = mean(zipf_scale_freq),
   freq_sd = sd(zipf_scale_freq))
